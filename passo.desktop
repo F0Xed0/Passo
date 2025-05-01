@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Passo
+Comment=Менеджер паролей с ассоциативной генерацией
+Exec=/home/foxed/Passo/venv/bin/python3 /home/foxed/Passo/src/main.py
+Icon=password-manager
+Terminal=false
+Type=Application
+Categories=Utility;Security;

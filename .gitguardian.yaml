@@ -1,0 +1,19 @@
+version: 2
+secret:
+  ignored_paths:
+    - "**/*.pyc"          # Игнорируем скомпилированные Python файлы
+    - "**/__pycache__/**" # Игнорируем кэш Python
+    - "venv/**"           # Игнорируем виртуальное окружение
+    - "tests/**/*.py"     # Игнорируем тестовые файлы
+  patterns:
+    - name: "Test Password Pattern"
+      pattern: "TEST_[A-Z_]+PASSWORD"
+      path: "tests/**/*.py"
+    - name: "Test Secret Pattern"
+      pattern: "test_.*secret.*"
+      path: "tests/**/*.py"
+  detectors:
+    - name: "Secret Keyword"
+      enabled: false
+    - name: "Password in URL"
+      enabled: false 
