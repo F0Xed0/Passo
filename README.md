@@ -63,3 +63,40 @@ black src/
 ## Лицензия
 
 MIT 
+
+## Запуск отдельных тестов
+
+Для запуска определённого тестового файла используйте следующую команду (находясь в корне проекта и с активированным виртуальным окружением):
+
+```bash
+PYTHONPATH=src pytest tests/имя_файла.py
+```
+
+Примеры:
+
+- Запуск тестов для менеджера базы данных:
+  ```bash
+  PYTHONPATH=src pytest tests/test_db_manager.py
+  ```
+- Запуск тестов для главного окна:
+  ```bash
+  PYTHONPATH=src pytest tests/test_main.py
+  ```
+- Запуск тестов для менеджера шифрования:
+  ```bash
+  PYTHONPATH=src pytest tests/test_crypto.py
+  ```
+- Запуск тестов для генератора паролей:
+  ```bash
+  PYTHONPATH=src pytest tests/test_password_generator.py
+  ```
+- Запуск тестов для менеджера окон:
+  ```bash
+  PYTHONPATH=src pytest tests/test_window_manager.py
+  ```
+
+Вы также можете запускать отдельные тестовые функции, добавив к команде параметр `-k` с именем теста:
+
+```bash
+PYTHONPATH=src pytest tests/test_db_manager.py -k имя_теста
+``` 

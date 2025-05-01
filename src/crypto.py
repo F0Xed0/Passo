@@ -15,6 +15,9 @@ class CryptoManager:
         :param master_password: Мастер-пароль для шифрования
         :param salt: Соль для генерации ключа (если None, генерируется новая)
         """
+        if salt is not None and len(salt) != 16:
+            raise ValueError("Некорректная длина соли. Должно быть 16 байт.")
+            
         self.salt = salt if salt else os.urandom(16)
         self.key = self._derive_key(master_password)
         self.fernet = Fernet(base64.urlsafe_b64encode(self.key))

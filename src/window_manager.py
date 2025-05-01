@@ -65,14 +65,22 @@ class WindowManager:
         """
         Получение информации об активном окне.
         """
-        window = self.display.get_input_focus().focus
-        window_class = window.get_wm_class()
-        window_name = window.get_wm_name()
-        
-        return {
-            'class': window_class[1] if window_class else 'Unknown',
-            'name': window_name if window_name else 'Unknown'
-        }
+        try:
+            window = self.display.get_input_focus().focus
+            if isinstance(window, int):
+                window = self.display.create_resource_object('window', window)
+            window_class = window.get_wm_class()
+            window_name = window.get_wm_name()
+            
+            return {
+                'class': window_class[1] if window_class else 'Unknown',
+                'name': window_name if window_name else 'Unknown'
+            }
+        except Exception:
+            return {
+                'class': 'Unknown',
+                'name': 'Unknown'
+            }
 
     def capture_screen_region(self, x: int, y: int, width: int, height: int) -> str:
         """
@@ -127,22 +135,34 @@ class WindowManager:
     def copy_to_clipboard(self, text: str, timeout: Optional[int] = None):
         """
         Копирование текста в буфер обмена с таймером на удаление.
+        Если text пустой, буфер обмена очищается.
         """
-        self.last_clipboard_content = pyperclip.paste()  # Сохраняем предыдущее содержимое
-        pyperclip.copy(text)
-        self.last_clipboard_time = time.time()
+        # Сохраняем текущее содержимое буфера обмена
+        current_content = pyperclip.paste()
         
-        if timeout is None:
-            timeout = self.clipboard_timeout
+        # Копируем новый текст или очищаем буфер
+        if text == '':
+            self.clear_clipboard()
+        else:
+            pyperclip.copy(text)
+            self.last_clipboard_content = current_content
+        
+        # Обновляем время и таймаут
+        self.last_clipboard_time = time.time()
+        if timeout is not None:
+            self.clipboard_timeout = timeout
 
     def clear_clipboard(self):
         """
         Очистка буфера обмена и восстановление предыдущего содержимого.
         """
-        if self.last_clipboard_content is not None:
+        # Сначала очищаем буфер
+        pyperclip.copy('')
+        
+        # Если есть предыдущее содержимое и оно не пустое, восстанавливаем его
+        if self.last_clipboard_content:
             pyperclip.copy(self.last_clipboard_content)
-        else:
-            pyperclip.copy('')
+        
         self.last_clipboard_time = 0
         self.last_clipboard_content = None
 

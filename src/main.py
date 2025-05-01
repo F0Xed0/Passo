@@ -1,5 +1,6 @@
 import sys
 import os
+import base64
 from datetime import datetime
 from typing import List, Optional
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
@@ -15,6 +16,7 @@ from crypto import CryptoManager
 from db_manager import DatabaseManager
 from password_generator import PasswordGenerator
 from window_manager import WindowManager
+from models import Settings
 
 class LoginDialog(QDialog):
     def __init__(self, parent=None):
@@ -130,14 +132,104 @@ class PasswordGeneratorDialog(QDialog):
         self.result.setText(password)
         self.explanation.setText(self.generator.explain_transformation(words, transformations))
 
+class EditPasswordDialog(QDialog):
+    def __init__(self, password_info, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Редактирование пароля")
+        self.setModal(True)
+        self.password_info = password_info
+        
+        layout = QVBoxLayout()
+        
+        # Название
+        self.title_input = QLineEdit()
+        self.title_input.setText(password_info['title'])
+        layout.addWidget(QLabel("Название:"))
+        layout.addWidget(self.title_input)
+        
+        # Сайт
+        self.website_input = QLineEdit()
+        self.website_input.setText(password_info.get('website', ''))
+        layout.addWidget(QLabel("Сайт:"))
+        layout.addWidget(self.website_input)
+        
+        # Пароль
+        password_layout = QHBoxLayout()
+        self.password_input = QLineEdit()
+        self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.password_input.setText(password_info['password'])
+        self.show_password = QPushButton("👁")
+        self.show_password.setFixedWidth(30)
+        self.show_password.clicked.connect(self.toggle_password_visibility)
+        self.generate_password = QPushButton("🎲")
+        self.generate_password.setFixedWidth(30)
+        self.generate_password.clicked.connect(self.open_password_generator)
+        
+        password_layout.addWidget(self.password_input)
+        password_layout.addWidget(self.show_password)
+        password_layout.addWidget(self.generate_password)
+        
+        layout.addWidget(QLabel("Пароль:"))
+        layout.addLayout(password_layout)
+        
+        # Теги
+        self.tags_input = QLineEdit()
+        self.tags_input.setText(", ".join(password_info.get('tags', [])))
+        self.tags_input.setPlaceholderText("Разделяйте теги запятыми")
+        layout.addWidget(QLabel("Теги:"))
+        layout.addWidget(self.tags_input)
+        
+        # Заметки
+        self.notes_input = QTextEdit()
+        self.notes_input.setText(password_info.get('notes', ''))
+        layout.addWidget(QLabel("Заметки:"))
+        layout.addWidget(self.notes_input)
+        
+        # Кнопки
+        button_layout = QHBoxLayout()
+        self.save_button = QPushButton("Сохранить")
+        self.cancel_button = QPushButton("Отмена")
+        
+        button_layout.addWidget(self.save_button)
+        button_layout.addWidget(self.cancel_button)
+        layout.addLayout(button_layout)
+        
+        self.setLayout(layout)
+        
+        # Подключаем сигналы
+        self.save_button.clicked.connect(self.accept)
+        self.cancel_button.clicked.connect(self.reject)
+        
+    def toggle_password_visibility(self):
+        if self.password_input.echoMode() == QLineEdit.EchoMode.Password:
+            self.password_input.setEchoMode(QLineEdit.EchoMode.Normal)
+            self.show_password.setText("🔒")
+        else:
+            self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
+            self.show_password.setText("👁")
+    
+    def open_password_generator(self):
+        dialog = PasswordGeneratorDialog(self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.password_input.setText(dialog.result.text())
+    
+    def get_password_data(self):
+        return {
+            'title': self.title_input.text(),
+            'password': self.password_input.text(),
+            'website': self.website_input.text(),
+            'tags': [tag.strip() for tag in self.tags_input.text().split(',') if tag.strip()],
+            'notes': self.notes_input.toPlainText()
+        }
+
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, existing_db=None):
         super().__init__()
         self.setWindowTitle("Passo - Менеджер паролей")
         self.setMinimumSize(800, 600)
         
         # Инициализация менеджеров
-        self.setup_managers()
+        self.setup_managers(existing_db)
         
         # Создание GUI
         self.setup_ui()
@@ -150,14 +242,29 @@ class MainWindow(QMainWindow):
         self.clipboard_timer.timeout.connect(self.check_clipboard)
         self.clipboard_timer.start(1000)  # Проверка каждую секунду
 
-    def setup_managers(self):
+    def setup_managers(self, existing_db=None):
         """
         Инициализация всех менеджеров.
         """
+        if existing_db:
+            self.db = existing_db
+            self.crypto = existing_db.crypto
+            self.window_manager = WindowManager()
+            return
+            
         data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'data')
         os.makedirs(data_dir, exist_ok=True)
         
         db_path = os.path.join(data_dir, 'passwords.db')
+        
+        # Создаем временный CryptoManager для инициализации базы данных
+        temp_crypto = CryptoManager("temp")
+        temp_db = DatabaseManager(db_path, temp_crypto)
+        
+        # Проверяем, есть ли настройки в базе данных
+        with temp_db.Session() as session:
+            settings = session.query(Settings).first()
+            is_first_run = settings is None
         
         # Запрашиваем мастер-пароль при запуске
         login_dialog = LoginDialog(self)
@@ -167,8 +274,35 @@ class MainWindow(QMainWindow):
         master_password = login_dialog.password_input.text()
         totp_code = login_dialog.totp_input.text()
         
-        self.crypto = CryptoManager(master_password)
-        self.db = DatabaseManager(db_path, self.crypto)
+        if is_first_run:
+            # Первый запуск - создаем настройки
+            self.crypto = CryptoManager(master_password)
+            self.db = DatabaseManager(db_path, self.crypto)
+            
+            with self.db.Session() as session:
+                settings = Settings(
+                    master_password_hash=base64.b64encode(self.crypto.key).decode(),
+                    salt=base64.b64encode(self.crypto.salt).decode(),
+                    two_factor_enabled=False
+                )
+                session.add(settings)
+                session.commit()
+        else:
+            # Проверяем пароль
+            with temp_db.Session() as session:
+                settings = session.query(Settings).first()
+                salt = base64.b64decode(settings.salt)
+                stored_key = base64.b64decode(settings.master_password_hash)
+                
+                # Создаем CryptoManager с сохраненной солью
+                self.crypto = CryptoManager(master_password, salt)
+                
+                if self.crypto.key != stored_key:
+                    QMessageBox.critical(self, "Ошибка", "Неверный мастер-пароль")
+                    sys.exit(1)
+            
+            self.db = DatabaseManager(db_path, self.crypto)
+        
         self.window_manager = WindowManager()
 
     def setup_ui(self):
@@ -253,6 +387,7 @@ class MainWindow(QMainWindow):
         Настройка иконки в системном трее.
         """
         self.tray_icon = QSystemTrayIcon(self)
+        self.tray_icon.setIcon(QIcon.fromTheme("dialog-password"))  # Используем системную иконку
         self.tray_icon.setToolTip("Passo")
         
         # Создаем контекстное меню
@@ -339,8 +474,53 @@ class MainWindow(QMainWindow):
         current_item = self.password_list.currentItem()
         if not current_item:
             return
-            
-        # TODO: Implement password editing
+        
+        # Получаем название пароля из текста элемента списка
+        title = current_item.text().split(" (")[0]
+        
+        # Ищем пароль в базе данных
+        passwords = self.db.search_passwords(query=title)
+        if not passwords:
+            QMessageBox.warning(self, "Ошибка", "Пароль не найден в базе данных")
+            return
+        
+        # Получаем полную информацию о пароле
+        password_info = self.db.get_password(passwords[0].id)
+        if not password_info:
+            QMessageBox.warning(self, "Ошибка", "Не удалось получить информацию о пароле")
+            return
+        
+        # Создаем диалог редактирования
+        dialog = EditPasswordDialog({
+            'title': password_info.title,
+            'password': self.crypto.decrypt(password_info.encrypted_password),
+            'website': password_info.website,
+            'tags': [tag.name for tag in password_info.tags],
+            'notes': password_info.notes
+        }, self)
+        
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            try:
+                # Получаем обновленные данные
+                updated_data = dialog.get_password_data()
+                
+                # Обновляем пароль в базе данных
+                success = self.db.update_password(
+                    password_info.id,
+                    password=updated_data['password'],
+                    title=updated_data['title'],
+                    website=updated_data['website'],
+                    tags=updated_data['tags'],
+                    notes=updated_data['notes']
+                )
+                
+                if success:
+                    # Обновляем список паролей
+                    self.update_password_list()
+                else:
+                    QMessageBox.critical(self, "Ошибка", "Не удалось обновить пароль")
+            except Exception as e:
+                QMessageBox.critical(self, "Ошибка", f"Произошла ошибка при обновлении пароля: {str(e)}")
 
     def delete_password(self):
         """
@@ -349,16 +529,43 @@ class MainWindow(QMainWindow):
         current_item = self.password_list.currentItem()
         if not current_item:
             return
-            
+        
+        # Получаем название пароля из текста элемента списка
+        title = current_item.text().split(" (")[0]
+        
+        # Ищем пароль в базе данных
+        passwords = self.db.search_passwords(query=title)
+        if not passwords:
+            QMessageBox.warning(self, "Ошибка", "Пароль не найден в базе данных")
+            return
+        
+        # Получаем полную информацию о пароле
+        password_info = self.db.get_password(passwords[0].id)
+        if not password_info:
+            QMessageBox.warning(self, "Ошибка", "Не удалось получить информацию о пароле")
+            return
+        
+        # Запрашиваем подтверждение
         reply = QMessageBox.question(
-            self, "Подтверждение",
-            "Вы уверены, что хотите удалить этот пароль?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            self,
+            "Подтверждение удаления",
+            f"Вы действительно хотите удалить пароль для {password_info.title}?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
         )
         
         if reply == QMessageBox.StandardButton.Yes:
-            # TODO: Implement password deletion
-            self.update_password_list()
+            try:
+                # Удаляем пароль
+                success = self.db.delete_password(password_info.id)
+                
+                if success:
+                    # Обновляем список паролей
+                    self.update_password_list()
+                else:
+                    QMessageBox.critical(self, "Ошибка", "Не удалось удалить пароль")
+            except Exception as e:
+                QMessageBox.critical(self, "Ошибка", f"Произошла ошибка при удалении пароля: {str(e)}")
 
     def copy_password(self):
         """
@@ -367,18 +574,95 @@ class MainWindow(QMainWindow):
         current_item = self.password_list.currentItem()
         if not current_item:
             return
-            
-        # TODO: Implement password copying
+        
+        # Получаем название пароля из текста элемента списка
+        title = current_item.text().split(" (")[0]
+        
+        # Ищем пароль в базе данных
+        passwords = self.db.search_passwords(query=title)
+        if not passwords:
+            QMessageBox.warning(self, "Ошибка", "Пароль не найден в базе данных")
+            return
+        
+        # Получаем полную информацию о пароле
+        password_info = self.db.get_password(passwords[0].id)
+        if not password_info:
+            QMessageBox.warning(self, "Ошибка", "Не удалось получить информацию о пароле")
+            return
+        
+        # Копируем пароль в буфер обмена
+        decrypted_password = self.crypto.decrypt(password_info.encrypted_password)
+        self.window_manager.copy_to_clipboard(decrypted_password)
+        
+        # Логируем использование
+        window_info = self.window_manager.get_active_window_info()
+        self.db.log_password_usage(
+            password_info.id,
+            window_info['class'],
+            window_info['name']
+        )
+        
+        # Показываем уведомление
+        self.tray_icon.showMessage(
+            "Пароль скопирован",
+            f"Пароль для {password_info.title} скопирован в буфер обмена",
+            QSystemTrayIcon.MessageIcon.Information,
+            2000  # Показываем на 2 секунды
+        )
 
     def autotype_password(self):
         """
-        Автоматический ввод пароля.
+        Автоматический ввод пароля в активное окно.
         """
         current_item = self.password_list.currentItem()
         if not current_item:
             return
+        
+        # Получаем название пароля из текста элемента списка
+        title = current_item.text().split(" (")[0]
+        
+        # Ищем пароль в базе данных
+        passwords = self.db.search_passwords(query=title)
+        if not passwords:
+            QMessageBox.warning(self, "Ошибка", "Пароль не найден в базе данных")
+            return
+        
+        # Получаем полную информацию о пароле
+        password_info = self.db.get_password(passwords[0].id)
+        if not password_info:
+            QMessageBox.warning(self, "Ошибка", "Не удалось получить информацию о пароле")
+            return
+        
+        # Запрашиваем подтверждение
+        reply = QMessageBox.information(
+            self,
+            "Автоввод пароля",
+            "Нажмите OK, когда будете готовы к вводу пароля. У вас будет 3 секунды, чтобы переключиться на нужное окно.",
+            QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Ok
+        )
+        
+        if reply == QMessageBox.StandardButton.Ok:
+            # Даем пользователю 3 секунды на переключение окна
+            QTimer.singleShot(3000, lambda: self._perform_autotype(password_info))
+
+    def _perform_autotype(self, password_info):
+        """
+        Выполняет автоввод пароля.
+        """
+        try:
+            decrypted_password = self.crypto.decrypt(password_info.encrypted_password)
+            self.window_manager.type_text(decrypted_password)
             
-        # TODO: Implement password auto-typing
+            # Логируем использование
+            window_info = self.window_manager.get_active_window_info()
+            self.db.log_password_usage(
+                password_info.id,
+                window_info['class'],
+                window_info['name']
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Произошла ошибка при вводе пароля: {str(e)}")
 
     def change_master_password(self):
         """

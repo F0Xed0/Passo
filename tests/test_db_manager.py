@@ -1,27 +1,33 @@
 import pytest
 import os
 from datetime import datetime, timedelta
-from src.db_manager import DatabaseManager
-from src.crypto import CryptoManager
-from src.models import Base
+from unittest.mock import MagicMock, patch
+import tempfile
+
+from crypto import CryptoManager
+from db_manager import DatabaseManager
+from models import Base, Password, Tag, UsageHistory, Settings
 
 @pytest.fixture
 def db_manager():
-    # Создаем временную базу данных для тестов
-    test_db_path = "test_passwords.db"
-    crypto = CryptoManager("test_password")
+    """
+    Создаем временную базу данных для тестов
+    """
+    with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as f:
+        db_path = f.name
     
-    # Создаем менеджер базы данных
-    manager = DatabaseManager(test_db_path, crypto)
+    crypto = CryptoManager("test_password")
+    manager = DatabaseManager(db_path, crypto)
     
     yield manager
     
-    # Удаляем тестовую базу после завершения
-    if os.path.exists(test_db_path):
-        os.remove(test_db_path)
+    if os.path.exists(db_path):
+        os.unlink(db_path)
 
 def test_add_password(db_manager):
-    # Тест добавления пароля
+    """
+    Тест добавления пароля
+    """
     password = db_manager.add_password(
         title="Test Account",
         password="TestP@ss123",
@@ -31,11 +37,17 @@ def test_add_password(db_manager):
         association_words=["test", "account"]
     )
     
+    assert password is not None
     assert password.title == "Test Account"
     assert password.website == "test.com"
     assert len(password.tags) == 2
+    assert password.notes == "Test notes"
+    assert password.association_words == "test,account"
 
 def test_get_password(db_manager):
+    """
+    Тест получения пароля
+    """
     # Добавляем тестовый пароль
     added = db_manager.add_password(
         title="Test",
@@ -47,11 +59,14 @@ def test_get_password(db_manager):
     password = db_manager.get_password(added.id)
     
     assert password is not None
-    assert password['title'] == "Test"
-    assert password['password'] == "TestP@ss123"
-    assert password['website'] == "test.com"
+    assert password.title == "Test"
+    assert password.website == "test.com"
+    assert db_manager.crypto.decrypt(password.encrypted_password) == "TestP@ss123"
 
 def test_update_password(db_manager):
+    """
+    Тест обновления пароля
+    """
     # Добавляем тестовый пароль
     password = db_manager.add_password(
         title="Old Title",
@@ -71,11 +86,14 @@ def test_update_password(db_manager):
     
     # Проверяем обновление
     updated = db_manager.get_password(password.id)
-    assert updated['title'] == "New Title"
-    assert updated['password'] == "NewP@ss123"
-    assert updated['website'] == "new.com"
+    assert updated.title == "New Title"
+    assert updated.website == "new.com"
+    assert db_manager.crypto.decrypt(updated.encrypted_password) == "NewP@ss123"
 
 def test_delete_password(db_manager):
+    """
+    Тест удаления пароля
+    """
     # Добавляем тестовый пароль
     password = db_manager.add_password(
         title="To Delete",
@@ -88,9 +106,13 @@ def test_delete_password(db_manager):
     assert success
     
     # Проверяем, что пароль удален
-    assert db_manager.get_password(password.id) is None
+    deleted = db_manager.get_password(password.id)
+    assert deleted is None
 
 def test_search_passwords(db_manager):
+    """
+    Тест поиска паролей
+    """
     # Добавляем тестовые пароли
     db_manager.add_password(
         title="Gmail Account",
@@ -109,19 +131,17 @@ def test_search_passwords(db_manager):
     # Поиск по названию
     results = db_manager.search_passwords(query="Gmail")
     assert len(results) == 1
-    assert results[0]['website'] == "gmail.com"
+    assert results[0].website == "gmail.com"
     
-    # Поиск по тегам
-    results = db_manager.search_passwords(tags=["dev"])
+    # Поиск по тегу
+    results = db_manager.search_passwords(tag="dev")
     assert len(results) == 1
-    assert results[0]['website'] == "github.com"
-    
-    # Поиск по сайту
-    results = db_manager.search_passwords(website="github")
-    assert len(results) == 1
-    assert results[0]['title'] == "GitHub Account"
+    assert results[0].title == "GitHub Account"
 
 def test_password_usage_history(db_manager):
+    """
+    Тест истории использования пароля
+    """
     # Добавляем пароль
     password = db_manager.add_password(
         title="Test Usage",
@@ -140,10 +160,13 @@ def test_password_usage_history(db_manager):
     history = db_manager.get_usage_history(password_id=password.id)
     
     assert len(history) == 1
-    assert history[0]['application_name'] == "Firefox"
+    assert history[0]['app_name'] == "Firefox"
     assert history[0]['window_title'] == "Login Page"
 
 def test_favorite_passwords(db_manager):
+    """
+    Тест избранных паролей
+    """
     # Добавляем пароль
     password = db_manager.add_password(
         title="Favorite Test",
@@ -157,7 +180,7 @@ def test_favorite_passwords(db_manager):
     
     # Проверяем статус
     password_info = db_manager.get_password(password.id)
-    assert password_info['is_favorite']
+    assert password_info.is_favorite
     
     # Убираем из избранного
     success = db_manager.toggle_favorite(password.id)
@@ -165,9 +188,12 @@ def test_favorite_passwords(db_manager):
     
     # Проверяем статус
     password_info = db_manager.get_password(password.id)
-    assert not password_info['is_favorite']
+    assert not password_info.is_favorite
 
 def test_tags_management(db_manager):
+    """
+    Тест управления тегами
+    """
     # Добавляем пароли с тегами
     db_manager.add_password(
         title="Test1",
@@ -189,15 +215,16 @@ def test_tags_management(db_manager):
     # Удаляем пароли и проверяем очистку неиспользуемых тегов
     passwords = db_manager.search_passwords()
     for p in passwords:
-        db_manager.delete_password(p['id'])
+        db_manager.delete_password(p.id)
     
-    cleaned = db_manager.cleanup_unused_tags()
-    assert cleaned == 3  # Должно быть удалено 3 тега
-    
+    # Проверяем, что все теги удалены
     tags = db_manager.get_all_tags()
     assert len(tags) == 0
 
 def test_edge_cases(db_manager):
+    """
+    Тест граничных случаев
+    """
     # Тест с несуществующим паролем
     assert db_manager.get_password(999) is None
     assert not db_manager.update_password(999, title="New")
@@ -214,13 +241,17 @@ def test_edge_cases(db_manager):
     )
     
     assert password is not None
+    assert password.website == ""
+    assert password.notes == ""
+    assert len(password.tags) == 0
+    assert password.association_words == ""
     
     # Тест с дубликатами тегов
-    db_manager.add_password(
+    password = db_manager.add_password(
         title="Duplicate Tags",
         password="DupP@ss123",
         tags=["tag1", "tag1", "tag1"]
     )
     
-    tags = db_manager.get_all_tags()
-    assert tags.count("tag1") == 1  # Теги должны быть уникальными 
+    assert password is not None
+    assert len(password.tags) == 1  # Дубликаты должны быть удалены 

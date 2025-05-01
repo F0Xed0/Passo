@@ -32,6 +32,9 @@ class PasswordGenerator:
         
         # Создаем хеш для обеспечения уникальности
         word_hash = hashlib.sha256("".join(words).encode()).hexdigest()[:8]
+        # Если цифры не разрешены, используем только буквенную часть хеша
+        if not include_numbers:
+            word_hash = ''.join(c for c in word_hash if not c.isdigit())
         
         # Начальное преобразование
         password = ""
@@ -47,7 +50,7 @@ class PasswordGenerator:
                 if include_numbers and char in self.number_mapping:
                     transformed += self.number_mapping[char]
                     word_trans[char] = self.number_mapping[char]
-                elif include_special and char in self.similar_chars:
+                elif include_special and char in self.similar_chars and (include_numbers or not self.similar_chars[char].isdigit()):
                     transformed += self.similar_chars[char]
                     word_trans[char] = self.similar_chars[char]
                 else:
@@ -62,13 +65,22 @@ class PasswordGenerator:
             transformations[word] = word_trans
         
         # Добавляем часть хеша для уникальности
-        password += word_hash[:4]
+        if word_hash:  # добавляем только если есть не-цифровые символы
+            password += word_hash[:4]
+        
+        # Добавляем как минимум один специальный символ, если требуется
+        if include_special:
+            password += random.choice(self.special_chars)
+        
+        # Добавляем как минимум одну цифру, если требуется
+        if include_numbers:
+            password += random.choice(string.digits)
         
         # Добавляем случайные символы, если пароль слишком короткий
         while len(password) < min_length:
-            if include_special:
+            if include_special and random.random() > 0.7:
                 password += random.choice(self.special_chars)
-            elif include_numbers:
+            elif include_numbers and random.random() > 0.5:
                 password += random.choice(string.digits)
             else:
                 password += random.choice(string.ascii_letters)
@@ -103,7 +115,7 @@ class PasswordGenerator:
         issues = []
         
         if len(password) < 12:
-            issues.append("Пароль должен быть не менее 12 символов")
+            issues.append("Длина пароля должна быть не менее 12 символов")
         
         if not any(c.isupper() for c in password):
             issues.append("Пароль должен содержать заглавные буквы")

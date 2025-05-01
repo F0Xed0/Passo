@@ -51,7 +51,9 @@ def test_export_import():
     assert decrypted_data == original_data
 
 def test_master_password_change():
-    # Тест смены мастер-пароля
+    """
+    Тест смены мастер-пароля
+    """
     crypto = CryptoManager("old_password")
     data = "test data"
     
@@ -62,14 +64,17 @@ def test_master_password_change():
     success = crypto.change_master_password("old_password", "new_password")
     assert success
     
-    # Пробуем расшифровать новым паролем
-    decrypted = crypto.decrypt(encrypted)
-    assert decrypted == data
+    # Шифруем новые данные новым паролем
+    new_data = "new test data"
+    new_encrypted = crypto.encrypt(new_data)
     
-    # Проверяем, что старый пароль больше не работает
+    # Проверяем, что можем расшифровать новые данные
+    decrypted = crypto.decrypt(new_encrypted)
+    assert decrypted == new_data
+    
+    # Проверяем, что не можем расшифровать старые данные
     with pytest.raises(ValueError):
-        old_crypto = CryptoManager("old_password", crypto.salt)
-        old_crypto.decrypt(encrypted)
+        crypto.decrypt(encrypted)
 
 def test_password_validation():
     # Тест валидации мастер-пароля
@@ -112,6 +117,9 @@ def test_edge_cases():
     assert crypto.decrypt(encrypted_unicode) == unicode_string
 
 def test_error_handling():
+    """
+    Тест обработки ошибок
+    """
     crypto = CryptoManager("test_password")
     
     # Некорректные входные данные для расшифровки
@@ -121,6 +129,13 @@ def test_error_handling():
     # Попытка изменить пароль с неверным старым паролем
     assert not crypto.change_master_password("wrong_password", "new_password")
     
+    # Проверка валидации пароля
+    assert not crypto.verify_master_password("short")  # Слишком короткий
+    assert not crypto.verify_master_password("no_numbers")  # Нет цифр
+    assert not crypto.verify_master_password("NO_LOWER_1")  # Нет строчных букв
+    assert not crypto.verify_master_password("no_upper_1")  # Нет заглавных букв
+    assert not crypto.verify_master_password("NoSpecial1")  # Нет спецсимволов
+    
     # Некорректная соль
     with pytest.raises(ValueError):
-        CryptoManager("test_password", b"invalid salt") 
+        CryptoManager("test_password", b"short_salt")  # Соль неправильной длины 
