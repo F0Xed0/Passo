@@ -228,4 +228,35 @@ class DatabaseManager:
         """
         with self.Session() as session:
             tags = session.scalars(select(Tag)).all()
-            return [tag.name for tag in tags] 
+            return [tag.name for tag in tags]
+
+    def get_setting(self, key: str) -> str | None:
+        """
+        Получить значение настройки по ключу.
+        """
+        with self.Session() as session:
+            setting = session.scalars(select(Settings).filter_by(key=key)).first()
+            return setting.value if setting else None
+
+    def set_setting(self, key: str, value: str):
+        """
+        Установить или обновить значение настройки по ключу.
+        """
+        with self.Session() as session:
+            setting = session.scalars(select(Settings).filter_by(key=key)).first()
+            if setting:
+                setting.value = value
+            else:
+                setting = Settings(key=key, value=value)
+                session.add(setting)
+            session.commit()
+
+    def delete_setting(self, key: str):
+        """
+        Удалить настройку по ключу.
+        """
+        with self.Session() as session:
+            setting = session.scalars(select(Settings).filter_by(key=key)).first()
+            if setting:
+                session.delete(setting)
+                session.commit() 

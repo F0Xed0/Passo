@@ -14,6 +14,9 @@ import pyotp
 
 from crypto import CryptoManager
 from db_manager import DatabaseManager
+import db_manager
+print('DatabaseManager loaded from:', db_manager.__file__)
+print('DatabaseManager methods:', dir(db_manager.DatabaseManager))
 from password_generator import PasswordGenerator
 from window_manager import WindowManager
 from models import Settings
@@ -288,18 +291,16 @@ class MainWindow(QMainWindow):
                 session.add(settings)
                 session.commit()
         else:
-            # Проверяем пароль
-            with temp_db.Session() as session:
-                settings = session.query(Settings).first()
-                salt = base64.b64decode(settings.salt)
-                stored_key = base64.b64decode(settings.master_password_hash)
-                
-                # Создаем CryptoManager с сохраненной солью
-                self.crypto = CryptoManager(master_password, salt)
-                
-                if self.crypto.key != stored_key:
-                    QMessageBox.critical(self, "Ошибка", "Неверный мастер-пароль")
-                    sys.exit(1)
+            # Получаем значения salt и master_password_hash из отдельных записей
+            salt = base64.b64decode(temp_db.get_setting("salt"))
+            stored_key = base64.b64decode(temp_db.get_setting("master_password_hash"))
+            
+            # Создаем CryptoManager с сохраненной солью
+            self.crypto = CryptoManager(master_password, salt)
+            
+            if self.crypto.key != stored_key:
+                QMessageBox.critical(self, "Ошибка", "Неверный мастер-пароль")
+                sys.exit(1)
             
             self.db = DatabaseManager(db_path, self.crypto)
         
@@ -432,7 +433,7 @@ class MainWindow(QMainWindow):
         
         self.password_list.clear()
         for password in passwords:
-            self.password_list.addItem(f"{password['title']} ({password['website']})")
+            self.password_list.addItem(f"{password.title} ({password.website})")
 
     def add_password(self):
         """
